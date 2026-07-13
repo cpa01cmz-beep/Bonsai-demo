@@ -239,16 +239,9 @@ BONSAI_FAMILY="$BONSAI_FAMILY" BONSAI_MODEL="$BONSAI_MODEL" sh "$SCRIPT_DIR/scri
 # ────────────────────────────────────────────────────
 #  7. llama.cpp pre-built binaries
 # ────────────────────────────────────────────────────
-_has_binaries=false
-for _d in bin/mac bin/cuda bin/rocm bin/hip bin/vulkan bin/cpu; do
-    ls "$_d"/llama-* >/dev/null 2>&1 && _has_binaries=true && break
-done
-
-if [ "$_has_binaries" = true ]; then
-    info "llama.cpp binaries already present."
-else
-    sh "$SCRIPT_DIR/scripts/download_binaries.sh"
-fi
+# Always defer to the downloader: it fast-skips when the installed binaries
+# already match the pinned release, and refreshes them when the pin changed.
+sh "$SCRIPT_DIR/scripts/download_binaries.sh"
 
 chmod +x "$SCRIPT_DIR"/scripts/*.sh 2>/dev/null || true
 
@@ -322,6 +315,41 @@ if [ "$OS" = "Darwin" ] && ! bonsai_should_skip_mlx; then
         "safetensors==0.7.0" "tokenizers==0.22.2" "sentencepiece==0.2.1" \
         "protobuf==7.34.0" "numpy==2.4.2" "gguf==0.18.0"
     info "MLX installed."
+fi
+
+# ── Open WebUI: the ChatGPT-like demo UI. Installed into the main venv so
+#    ./scripts/start_openwebui.sh works out of the box. Skip with BONSAI_OPENWEBUI=0. ──
+if [ "${BONSAI_OPENWEBUI:-1}" != "0" ]; then
+    if "$VENV_PY" -c "import open_webui" 2>/dev/null; then
+        info "Open WebUI already installed."
+    else
+        step "Installing Open WebUI (large download, a few minutes) ..."
+        # Install via the pinned `webui` extra in pyproject.toml (open-webui==0.10.2)
+        # rather than an unpinned name, so the version stays reproducible.
+        if uv pip install --python "$VENV_PY" ".[webui]"; then
+            info "Open WebUI installed."
+        else
+            warn "Open WebUI install failed — install it manually with 'uv pip install \".[webui]\"' before running scripts/start_openwebui.sh."
+        fi
+    fi
+fi
+
+# ── Code interpreter (Open WebUI): a Jupyter kernel with the scientific stack
+#    (matplotlib, pandas, numpy, scipy, sympy, yfinance) so the model can run
+#    Python, make plots, and pull market data. Isolated venv, all platforms.
+#    Skip with BONSAI_CODE_INTERPRETER=0. ──
+if [ "${BONSAI_CODE_INTERPRETER:-1}" != "0" ]; then
+    step "Setting up the code-interpreter venv (Jupyter + plotting / data libs) ..."
+    JUP_VENV="$SCRIPT_DIR/.venv-jupyter"
+    if [ -x "$JUP_VENV/bin/jupyter" ]; then
+        info "code-interpreter venv already present."
+    elif uv venv "$JUP_VENV" --python "$PYTHON_VERSION" >/dev/null 2>&1 \
+        && uv pip install --python "$JUP_VENV/bin/python" \
+            jupyter-server ipykernel matplotlib numpy pandas scipy sympy pillow requests yfinance; then
+        info "code-interpreter venv ready (.venv-jupyter)."
+    else
+        warn "code-interpreter venv setup failed — Open WebUI code execution will be unavailable."
+    fi
 fi
 
 # ────────────────────────────────────────────────────
